@@ -87,6 +87,17 @@ try:
 except:
     print(datetime.datetime.now(), "No last update times backup!")
 
+
+def update_data_and_update_time():
+    print("Updating both data and last update time...", end=' ')
+    with open('RANKING_DATA.json', 'w') as f:
+        json.dump(DATABASE, f)
+        
+    with open('last_update_times.pkl', 'wb') as f:
+        pickle.dump(LAST_UPDATE, f)
+    print("Done!")
+    
+
 def refresh_names():
     #Try to initialize ALL_TITLES
     for k, v in DATABASE.items():
@@ -156,16 +167,11 @@ async def check_update_queue():
                 if data is not None:
                     DATABASE[key] = data
 
-                #update Database file
-                with open('RANKING_DATA.json', 'w') as f:
-                    json.dump(DATABASE, f)
-
                 refresh_names()
 
                 #update LAST_UPDATE
                 LAST_UPDATE[key] = current
-                with open('last_update_times.pkl', 'wb') as f:
-                    pickle.dump(LAST_UPDATE, f)
+                update_data_and_update_time()
 
             #build the embed
             rank, cover_link = iterate_over_database(
@@ -722,8 +728,7 @@ def iterate_over_database(category, title, key):
         refresh_names()
         LAST_UPDATE[key] = time.time()
         #update Database file
-        with open('RANKING_DATA.json', 'w') as f:
-            json.dump(DATABASE, f)
+        update_data_and_update_time()
         
     for rankNo, bookId, updateId, bookName, amount in DATABASE[key]:
         if bookName.lower() == title.lower():
