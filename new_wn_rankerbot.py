@@ -159,6 +159,10 @@ async def check_update_queue():
         channel = await client.fetch_channel(channel)
         if timestamp <= current:
             #check if last update time is within the past n-seconds
+            #check if LAST_UPDATE[key] exists
+            if not LAST_UPDATE.get(key, None):
+                LAST_UPDATE[key] = 0
+                
             if current - LAST_UPDATE[key] > UPDATE_DELAY:
                 #If the last update is outdated, gather new data
                 data = get_data(
