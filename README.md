@@ -1,5 +1,6 @@
 # RankCheckerBot
-Code of my Discord Bot for checking Webnovel.com ranking data
+Code of my Discord Bot for checking Webnovel.com ranking data.
+
 To be able to use this, you'd need the following variables in a `.env` file:
 ```python
 CSRFTOKEN = *SOME VALUE*
