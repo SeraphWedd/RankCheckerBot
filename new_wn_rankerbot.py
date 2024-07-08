@@ -88,7 +88,7 @@ except:
     print(datetime.datetime.now(), "No last update times backup!")
 
 
-def update_data_and_update_time():
+async def update_data_and_update_time():
     print("Updating both data and last update time...", end=' ')
     with open('RANKING_DATA.json', 'w') as f:
         json.dump(DATABASE, f)
@@ -98,12 +98,11 @@ def update_data_and_update_time():
     print("Done!")
     
 
-def refresh_names():
+async def refresh_names():
     #Try to initialize ALL_TITLES
     for k, v in DATABASE.items():
         for _, _, _, n, _ in v:
             ALL_TITLES.add(n)
-refresh_names()
 
 #Initial Setup
 TOKEN = os.getenv('TOKEN')
@@ -121,9 +120,10 @@ tree = app_commands.CommandTree(client)
 async def on_ready():
     print(datetime.datetime.now(), "Connected to Discord!")
     check_update_queue.start()
-    time.sleep(1)
+    await asyncio.sleep(1)
     create_backup_data.start()
-    time.sleep(1)
+    await asyncio.sleep(1)
+    await refresh_names()
 
 
 #------------------------------------------------------------------------------
@@ -171,22 +171,26 @@ async def check_update_queue():
                 if data is not None:
                     DATABASE[key] = data
 
-                refresh_names()
+                await refresh_names()
 
                 #update LAST_UPDATE
                 LAST_UPDATE[key] = current
-                update_data_and_update_time()
+                
+                await update_data_and_update_time()
 
             #build the embed
-            rank, cover_link = iterate_over_database(
+            rank, cover_link, title = await iterate_over_database(
                 category, title, key
             )
             
             try:
-                emb = build_rank_embed(
+                emb, st = build_rank_embed(
                     category, title, rank, cover_link, name, avatar
                 )
-                await channel.send(embed=emb)
+                if st:
+                    await channel.send(embed=emb)
+                else:
+                    await channel.send(embed=emb, delete_after=3600)
                 
             except Exception as e:
                 print("Cannot send to channel!")
@@ -229,11 +233,13 @@ async def resync(interaction: discord.Interaction):
         cnt = await tree.sync()
         print(datetime.datetime.now(), f"Command tree synced {len(cnt)} commands!")
         await interaction.response.send_message(
-            f"Command tree synced {len(cnt)} commands!"
+            f"Command tree synced {len(cnt)} commands!",
+            ephemeral=True,
         )
     else:
         await interaction.response.send_message(
-            'You must be the owner to use this command!'
+            'You must be the owner to use this command!',
+            ephemeral=True,
         )
 
         
@@ -253,7 +259,8 @@ async def get_all_guilds(interaction: discord.Interaction):
             )
     else:
         await interaction.response.send_message(
-            'You must be the owner to use this command!'
+            'You must be the owner to use this command!',
+            ephemeral=True,
         )
 
 
@@ -278,10 +285,11 @@ async def ghost_ping_all_channels(interaction: discord.Interaction):
             channel = await client.fetch_channel(c)
             allowed_mentions = discord.AllowedMentions(everyone=True)
             await channel.send(
-                "@silent @everyone",
+                "@silent Keeping the channel alive!",
                 allowed_mentions=allowed_mentions,
                 delete_after=10.0
             )
+            asyncio.sleep(2)
     else:
         await interaction.response.send_message(
             'You must be the owner to use this command!'
@@ -391,6 +399,7 @@ async def track_book(
     contract: str,
     sex: str,
 ):
+    global TRACKING_LIST
     await interaction.response.defer() #wait for bot  to reply without timeout
     
     try: #overall try case
@@ -424,6 +433,7 @@ async def track_book(
                 remo_i = int(n)
                 break
         if rem:
+            print("Popping!!")
             TRACKING_LIST.pop(remo_i) #Remove old and renew
             
         delay = int(3600*interval_hrs)
@@ -434,7 +444,6 @@ async def track_book(
                 resp + f'Tracking the book **"{book_title}"** '+\
                 f'under **{category.replace("_", " ").title()}** tab ' +\
                 f'every {interval_hrs:.1f} hours!',
-                ephemeral=True,
             )
             
             TRACKING_LIST.append(
@@ -461,8 +470,7 @@ async def track_book(
         
     except Exception as e:
         await interaction.followup.send(
-                'Sorry, some error occurred!\n'+str(e),
-                ephemeral=True,
+                'Sorry, some error occurred!\n'+str(e)
             )
         
     
@@ -539,7 +547,7 @@ async def admin_check_tracked(
             title, channel, name, avatar = values
             items.append((n, key.split('-')[0], title, channel))
         msg += '\n'.join([f'**Item {n}**: {i} ({j} {k})' for n, i, j, k in items])
-        await interaction.response.send_message(msg)
+        await interaction.response.send_message(msg, ephemeral=True)
 
 
 #------------------------------------------------------------------------------
@@ -562,7 +570,7 @@ async def admin_remove_tracked(
         TRACKING_LIST = new_tracker.copy()
         
     msg = f'Successfully removed **{string.capwords(name)}** from **{category.capitalize()}** tracker!'
-    await interaction.response.send_message(msg)
+    await interaction.response.send_message(msg, ephemeral=True)
     
     await check_update_queue() #call upon addition of new task
 
@@ -631,11 +639,11 @@ async def get_rank(
         time_range, time_type = filter_values(category, time_range, time_type)
                 
         key = build_key(category, time_type, time_range, content, contract, sex)
-        rank, cover_link = iterate_over_database(
+        rank, cover_link, book_title = await iterate_over_database(
                     category, book_title, key
                 )
         
-        emb = build_rank_embed(
+        emb, st = build_rank_embed(
             category,
             book_title,
             rank,
@@ -644,13 +652,11 @@ async def get_rank(
             interaction.user.display_avatar.url
         )
 
-        
         await interaction.followup.send(embed=emb)
         
     except Exception as e:
         await interaction.followup.send(
                 'Sorry, some error occurred!\n'+str(e),
-                ephemeral=True,
             )
 
     
@@ -670,9 +676,9 @@ def build_rank_embed(category, book_title, rankings, cover_link, name, url):
         'fandom_rank':discord.Color.orange(),
     }
     emb = discord.Embed(
-        title=f"{category.replace('_', ' ').capitalize()} Ranking",
-        description=f'**Title: [{string.capwords(book_title)}]({book_lnk})**\n' +
-        'Below is all the rankings of the book across all boards:\n',
+        title=f"{category.replace('_rank', '').replace('_', ' ').title()} Ranking",
+        description=f'**Title: [{book_title}]({book_lnk})**\n' +
+        'Below is the ranking of the book:\n',
         colour=color.get(category.lower(), discord.Color.greyple()),
         timestamp=datetime.datetime.now(),
     )
@@ -680,6 +686,7 @@ def build_rank_embed(category, book_title, rankings, cover_link, name, url):
         name=name,
         icon_url=url
     )
+    status = False #If the rank is successfully added or not
 
     if rankings is not None:
         rank, key, value = rankings
@@ -705,13 +712,16 @@ def build_rank_embed(category, book_title, rankings, cover_link, name, url):
             value=value_str,
             inline=False,
         )
+        status = True
             
     else:
         emb.add_field(
             name="Book not in any of the rankings!",
             value='Please check the spelling of the book ' +\
             f'title and try again: **{book_title.title()}**' +\
-            '\nNote: The title is **not** case sensitive.',
+            '\nNote: The title is **not** case sensitive.' +\
+            '\nIf title is correct, that means the book is ' +\
+            'not in this ranking board currently.',
             inline=False,
         )
 
@@ -719,25 +729,25 @@ def build_rank_embed(category, book_title, rankings, cover_link, name, url):
         emb.set_image(url=cover_link)
         emb.set_thumbnail(url=cover_link)
 
-    return emb
+    return emb, status
 
 
 #------------------------------------------------------------------------------
-def iterate_over_database(category, title, key):
+async def iterate_over_database(category, title, key):
     if not DATABASE.get(key, None):
         print("Fetching Data for category:", category)
         rankId, listType, timeType, sourceType, signStatus, sex = key.split('-')
         data = get_data(rankId, listType, timeType, sourceType, signStatus, sex)
         if data is not None: DATABASE[key] = data
-        refresh_names()
+        await refresh_names()
         LAST_UPDATE[key] = time.time()
         #update Database file
-        update_data_and_update_time()
+        await update_data_and_update_time()
         
     for rankNo, bookId, updateId, bookName, amount in DATABASE[key]:
         if bookName.lower() == title.lower():
-            return (rankNo, key, amount), f'https://book-pic.webnovel.com/bookcover/{bookId}?imageMogr2/thumbnail/150&imageId={updateId}'
-    return None, None
+            return (rankNo, key, amount), f'https://book-pic.webnovel.com/bookcover/{bookId}?imageMogr2/thumbnail/150&imageId={updateId}', bookName
+    return None, None, None
 
 
 #------------------------------------------------------------------------------
