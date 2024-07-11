@@ -286,24 +286,31 @@ async def get_all_guilds(interaction: discord.Interaction):
 async def ghost_ping_all_channels(interaction: discord.Interaction):
     if interaction.user.id == OWNER_ID:
         ch = []
-        guild = await client.get_guild(interaction.guild_id)
-        for channel in guild.channels:
-            if str(channel.type) == 'text':
-                ch.append(channel.id)
-        
-        await interaction.response.send_message(
-            "Ghost pinging {len(ch)} channels!", ephemeral=True,
-            )
+        try:
+            guild = client.get_guild(interaction.guild_id)
+            for channel in guild.channels:
+                if str(channel.type) == 'text':
+                    ch.append(channel.id)
+            
+            await interaction.response.send_message(
+                f"Ghost pinging {len(ch)} channels!", ephemeral=True,
+                )
 
-        for c in ch:
-            channel = await client.fetch_channel(c)
-            allowed_mentions = discord.AllowedMentions(everyone=True)
-            await channel.send(
-                "@silent Keeping the channel alive!",
-                allowed_mentions=allowed_mentions,
-                delete_after=10.0
-            )
-            await asyncio.sleep(2)
+            for c in ch:
+                channel = await client.fetch_channel(c)
+                allowed_mentions = discord.AllowedMentions(everyone=True)
+                await channel.send(
+                    "Keeping the channel alive!",
+                    silent=True,
+                    allowed_mentions=allowed_mentions,
+                    delete_after=10.0
+                )
+                await asyncio.sleep(2)
+        except Exception as e:
+            await interaction.response.send_message(
+            "The command encountered an error!\n"+ str(e),
+            ephemeral=True
+        )
     else:
         await interaction.response.send_message(
             'You must be the owner to use this command!'
