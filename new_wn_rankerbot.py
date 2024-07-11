@@ -61,6 +61,7 @@ def build_key(category, time_type, time_range, content, contract, sex):
 DATABASE = {}
 LAST_UPDATE = {} #key:val == build_key:timestamp of last update
 TRACKING_LIST = [] #(timestamp, build_key, interval, [title, channel, name, avatar])
+BIRTHDAY_LIST = {} #Birthdays grouped per guild, (mm, dd, yyyy, name, id, channel)
 CSRFTOKEN = os.getenv("CSRFTOKEN")
 UPDATE_DELAY = 1800
 ALL_TITLES = set()
@@ -86,6 +87,13 @@ try:
         print(datetime.datetime.now(), "Loaded last update times from backup!")
 except:
     print(datetime.datetime.now(), "No last update times backup!")
+
+try:
+    with open('birthday_tracker.json', 'r') as f:
+        BIRTHDAY_LIST = json.load(f)
+        print(datetime.datetime.now(), "Loaded birthday list from backup!")
+except:
+    print(datetime.datetime.now(), "No birthday list backup!")
 
 
 async def update_data_and_update_time():
@@ -122,6 +130,8 @@ async def on_ready():
     check_update_queue.start()
     await asyncio.sleep(1)
     create_backup_data.start()
+    await asyncio.sleep(1)
+    check_birthdays.start()
     await asyncio.sleep(1)
     await refresh_names()
 
@@ -179,9 +189,11 @@ async def check_update_queue():
                 await update_data_and_update_time()
 
             #build the embed
-            rank, cover_link, title = await iterate_over_database(
+            rank, cover_link, n_title = await iterate_over_database(
                 category, title, key
             )
+            if n_title is not None:
+                title = n_title
             
             try:
                 emb, st = build_rank_embed(
@@ -230,6 +242,8 @@ async def title_autocomplete(
 )
 async def resync(interaction: discord.Interaction):
     if interaction.user.id == OWNER_ID:
+        #tree.copy_global_to(guild=interaction.guild)
+        #cnt = await tree.sync(guild=interaction.guild)
         cnt = await tree.sync()
         print(datetime.datetime.now(), f"Command tree synced {len(cnt)} commands!")
         await interaction.response.send_message(
@@ -289,7 +303,7 @@ async def ghost_ping_all_channels(interaction: discord.Interaction):
                 allowed_mentions=allowed_mentions,
                 delete_after=10.0
             )
-            asyncio.sleep(2)
+            await asyncio.sleep(2)
     else:
         await interaction.response.send_message(
             'You must be the owner to use this command!'
@@ -548,6 +562,11 @@ async def admin_check_tracked(
             items.append((n, key.split('-')[0], title, channel))
         msg += '\n'.join([f'**Item {n}**: {i} ({j} {k})' for n, i, j, k in items])
         await interaction.response.send_message(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(
+            'You must be the owner to use this command!',
+            ephemeral=True,
+        )
 
 
 #------------------------------------------------------------------------------
@@ -569,10 +588,15 @@ async def admin_remove_tracked(
         new_tracker = [i for n, i in enumerate(TRACKING_LIST) if n != d]
         TRACKING_LIST = new_tracker.copy()
         
-    msg = f'Successfully removed **{string.capwords(name)}** from **{category.capitalize()}** tracker!'
-    await interaction.response.send_message(msg, ephemeral=True)
-    
-    await check_update_queue() #call upon addition of new task
+        msg = f'Successfully removed **{string.capwords(name)}** from **{category.capitalize()}** tracker!'
+        await interaction.response.send_message(msg, ephemeral=True)
+        
+        await check_update_queue() #call upon addition of new task
+    else:
+        await interaction.response.send_message(
+            'You must be the owner to use this command!',
+            ephemeral=True,
+        )
 
 
 #------------------------------------------------------------------------------
@@ -639,9 +663,12 @@ async def get_rank(
         time_range, time_type = filter_values(category, time_range, time_type)
                 
         key = build_key(category, time_type, time_range, content, contract, sex)
-        rank, cover_link, book_title = await iterate_over_database(
+        rank, cover_link, n_title = await iterate_over_database(
                     category, book_title, key
                 )
+        
+        if n_title is not None:
+            book_title = n_title
         
         emb, st = build_rank_embed(
             category,
@@ -846,6 +873,144 @@ def filter_values(category, tr, ty):
             time_range = '3'
     return time_range, time_type
 
+
+#------------------------------------------------------------------------------
+@tree.command(
+    name='add_birthday',
+    description="Tracks member's birthday.",
+)
+@discord.app_commands.choices(
+    month=[
+        discord.app_commands.Choice(name='January', value=1),
+        discord.app_commands.Choice(name='February', value=2),
+        discord.app_commands.Choice(name='March', value=3),
+        discord.app_commands.Choice(name='April', value=4),
+        discord.app_commands.Choice(name='May', value=5),
+        discord.app_commands.Choice(name='June', value=6),
+        discord.app_commands.Choice(name='July', value=7),
+        discord.app_commands.Choice(name='August', value=8),
+        discord.app_commands.Choice(name='September', value=9),
+        discord.app_commands.Choice(name='October', value=10),
+        discord.app_commands.Choice(name='November', value=11),
+        discord.app_commands.Choice(name='December', value=12),
+
+    ],
+)
+async def add_birthday(
+    interaction: discord.Interaction,
+    month: int,
+    day: int,
+    year: int,
+    member: discord.Member
+):
+    try:
+        #check if birthday is valid
+        bd = datetime.datetime(month=month, day=day, year=year)
+    except ValueError as e:
+        await interaction.response.send_message(
+            "Sorry, you've entered an invalid date! Please double check!" +\
+            f"\nmm/dd/yyyy={month}/{day}/{year}",
+            ephemeral=True
+        )
+        return
+
+    guild_id = str(interaction.guild_id)
+    #Check if guild already has a list
+    if not BIRTHDAY_LIST.get(guild_id, None):
+        BIRTHDAY_LIST[guild_id] = []
+
+    #check if name is already in list, if yes, overwrite the id
+    exists = False
+    q = 0
+    for q, (m,d,y,n,i,c) in enumerate(BIRTHDAY_LIST[guild_id]):
+        if i==member.id:
+            exists = True
+            break
+        
+    if not exists:
+        BIRTHDAY_LIST[guild_id].append((
+            month, day, year,
+            member.name, member.id,
+            interaction.channel.id
+        ))
+    else:
+        BIRTHDAY_LIST[guild_id][q] = (
+            month, day, year,
+            member.name, member.id,
+            interaction.channel.id
+        )
+            
+    with open('birthday_tracker.json', 'w') as f:
+        json.dump(BIRTHDAY_LIST, f)
+
+    await interaction.response.send_message(
+        "Successfully added birthday!" +\
+        f"<@{member.id}>'s birthday is set as: **{month}-{day}-{year}**"
+    )
+    
+
+#------------------------------------------------------------------------------
+@tree.command(
+    name='view_birthday',
+    description="View guild member's birthday.",
+)
+async def view_birthday(
+    interaction: discord.Interaction,
+):
+    members = BIRTHDAY_LIST.get(str(interaction.guild_id), None)
+    
+    if members is None:
+        await interaction.response.send_message(
+            "There's no registered birthdays yet!" +\
+            "\nUse `/add_birthday` to add member birthdays!",
+            ephemeral=True
+        )
+        return
+    msg = []
+    for i, (m, d, y, name, mid, cid) in enumerate(members):
+        msg.append(
+            f"{i+1}. **{name}**: {m}-{d}-{y}"
+        )
+    msg = '\n'.join(msg)
+    emb = discord.Embed(
+        title=f'Registered birthdays for this Server:',
+        description=msg
+    )
+    await interaction.response.send_message(
+        embed=emb
+    )
+
+    
+#------------------------------------------------------------------------------
+@tasks.loop(seconds=3600)
+async def check_birthdays():
+    global BIRTHDAY_LIST
+    date = datetime.datetime.now()
+    mm, dd, yy, hh = date.month, date.day, date.year, date.hour
+    if (hh != 6):
+        return
+    
+    print("Checking birthdays...", end=' ')
+    
+    for key in BIRTHDAY_LIST.keys():
+        for m, d, y, name, mid, cid in BIRTHDAY_LIST[key]:
+            channel = await client.fetch_channel(cid)
+            if (mm == int(m)) and (dd == int(d)) and (yy == int(y)):
+                #Birthday matches
+                try:
+                    allowed_mentions = discord.AllowedMentions(everyone=True)
+                    
+                    await channel.send(
+                        f"# @everyone wish <@{mid}> a verry happy birthday today!",
+                        allowed_mentions=allowed_mentions
+                    )
+                    
+                except Exception as e:
+                    print("Cannot send to channel!")
+                    print("Error!", e)
+    print("Complete!")
+
+                    
 #------------------------------------------------------------------------------
 if __name__ == "__main__":
     client.run(TOKEN)
