@@ -152,7 +152,7 @@ async def create_backup_data():
 #------------------------------------------------------------------------------
 @tasks.loop(seconds=60)
 async def check_update_queue():
-    global TRACKING_LIST
+    global TRACKING_LIST, DATABASE, LAST_UPDATE
     print(datetime.datetime.now(),
           "Timed task running!",
           "No. of tasks:", len(TRACKING_LIST),
@@ -162,7 +162,7 @@ async def check_update_queue():
     checked = []
     current = time.time()
     #Iterate over the list
-    for timestamp, key, delay, values in queue:
+    for q, (timestamp, key, delay, values) in enumerate(queue):
         #Check if item is past its next update time
         category, time_type, time_range, source, contract, sex = key.split('-')
         title, channel, name, avatar = values
@@ -217,10 +217,12 @@ async def check_update_queue():
         else:
             checked.append((timestamp, key, delay, values))
 
-        TRACKING_LIST = checked.copy()
-
-        with open('tracking_list_backup.pkl', 'wb') as f:
-            pickle.dump(TRACKING_LIST, f)
+        if q + 1 == len(checked):
+            TRACKING_LIST = checked.copy()
+            with open('tracking_list_backup.pkl', 'wb') as f:
+                pickle.dump(TRACKING_LIST, f)
+        else:
+            print("ERROR! Tracking list length changed!")
 
 
 #------------------------------------------------------------------------------
@@ -674,7 +676,7 @@ async def get_rank(
                     category, book_title, key
                 )
         
-        if n_title is not None:
+        if n_title:
             book_title = n_title
         
         emb, st = build_rank_embed(
@@ -768,8 +770,22 @@ def build_rank_embed(category, book_title, rankings, cover_link, name, url):
 
 #------------------------------------------------------------------------------
 async def iterate_over_database(category, title, key):
+    #Check if the item was updated before, if not, add the key
+    if not LAST_UPDATE.get(key, None):
+        LAST_UPDATE[key] = 0
+        
     if not DATABASE.get(key, None):
         print("Fetching Data for category:", category)
+        rankId, listType, timeType, sourceType, signStatus, sex = key.split('-')
+        data = get_data(rankId, listType, timeType, sourceType, signStatus, sex)
+        if data is not None: DATABASE[key] = data
+        await refresh_names()
+        LAST_UPDATE[key] = time.time()
+        #update Database file
+        await update_data_and_update_time()
+
+    elif time.time() - LAST_UPDATE[key] > UPDATE_DELAY:
+        print("Updating Data for category:", category)
         rankId, listType, timeType, sourceType, signStatus, sex = key.split('-')
         data = get_data(rankId, listType, timeType, sourceType, signStatus, sex)
         if data is not None: DATABASE[key] = data
