@@ -217,12 +217,12 @@ async def check_update_queue():
         else:
             checked.append((timestamp, key, delay, values))
 
-        if q + 1 == len(checked):
-            TRACKING_LIST = checked.copy()
-            with open('tracking_list_backup.pkl', 'wb') as f:
-                pickle.dump(TRACKING_LIST, f)
-        else:
-            print("ERROR! Tracking list length changed!")
+    if q + 1 == len(checked):
+        TRACKING_LIST = checked.copy()
+        with open('tracking_list_backup.pkl', 'wb') as f:
+            pickle.dump(TRACKING_LIST, f)
+    else:
+        print("ERROR! Tracking list length changed!")
 
 
 #------------------------------------------------------------------------------
